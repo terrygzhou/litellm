@@ -9881,3 +9881,48 @@ def test_media_models_resolve_to_each_deployment_base_model():
     assert _resolve_media_models(None, "whisper", None) == ("whisper",)
     assert _resolve_media_models(router, "whisper", None) == ("azure/whisper-1",)
     assert _resolve_media_models(router, "unknown", None) == ("unknown",)
+
+
+@pytest.mark.parametrize(
+    ("requested_model", "group", "allowlist", "deferred"),
+    [
+        ("whisper", None, frozenset({"whisper"}), "deferred"),
+        ("gpt-6.1-sol", "prod", frozenset({"prod"}), "immediate"),
+        ("gpt-6.1-sol", "prod", frozenset({"other"}), "deferred"),
+    ],
+    ids=["model_in_allowlist_deferred", "group_in_allowlist_immediate", "allowlist_miss"],
+)
+def test_deferred_parallel_slot_check_is_skipped_for_allowlisted_models(
+    requested_model: str, group: str | None, allowlist: frozenset[str], deferred: str
+):
+    handler: Final = PROXY_MaxParallelRequestsHandler_v3(
+        internal_usage_cache=InternalUsageCache(DualCache()),
+        rate_limit_store=_ScriptedRedis().store(),
+        parallel_model_allowlist_resolver=lambda: allowlist,
+        model_group_resolver=lambda model: group,
+    )
+    gauges: Final = (RateLimitScope("api_key", "sk-abc"),)
+
+    slot_id: Final = handler._resolve_parallel_slot_id(
+        reuses_request_slot=False,
+        parallel_gauges=gauges,
+        deferred_parallel_slot_check=deferred,
+        requested_model=requested_model,
+    )
+
+    short_circuited: Final = requested_model in allowlist or (group or requested_model) in allowlist
+    assert (slot_id is None) == short_circuited
+
+
+def test_reuses_request_slot_never_acquires_a_parallel_slot():
+    handler = _handler_with_redis(_ScriptedRedis())
+    gauges: Final = (RateLimitScope("team", "t1"),)
+
+    slot_id: Final = handler._resolve_parallel_slot_id(
+        reuses_request_slot=True,
+        parallel_gauges=gauges,
+        deferred_parallel_slot_check="deferred",
+        requested_model="whisper",
+    )
+
+    assert slot_id is None

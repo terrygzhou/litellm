@@ -221,6 +221,7 @@ from litellm.router_utils.pre_call_checks.encrypted_content_affinity_check impor
 from litellm.router_utils.pre_call_checks.io_token_rate_limit_check import async_io_token_refund_failure
 from litellm.router_utils.router_callbacks.track_deployment_metrics import find_deployment_metadata
 from litellm.router_utils.routing_read_batch import RoutingReadBatch
+from litellm.scheduler import set_scheduler_redis_cache as _register_scheduler_redis_cache
 from litellm.types.router import (
     AllowedFailsPolicy,
     Deployment,
@@ -1391,6 +1392,7 @@ class RustCore(
         self._legacy: Final = legacy
         self._health_view: RustHealth | None = None
         self._cache: DualCache = host.routing_cache(config)
+        _register_scheduler_redis_cache(self._cache.redis_cache)
         redis: Final = connect(self._cache.redis_cache)
         self._usage: RouterUsage = host.router_usage(redis)
         self._cooldowns: CooldownCache = CooldownCache(
